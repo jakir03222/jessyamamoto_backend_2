@@ -62,11 +62,6 @@ const serviceBaseUserController = async (req: Request, res: Response) => {
 const serviceUserBaseUserController = catchAsync(async (req, res) => {
   const { categoryId } = req.params;
 
-  if (!req.user?.id) {
-    throw new AppError(401, 'Unauthorized');
-  }
-
-  // ✅ filters
   const filters = pick(req.query, [
     'searchTerm',
     'firstName',
@@ -89,9 +84,26 @@ const serviceUserBaseUserController = catchAsync(async (req, res) => {
     'available',
   ]);
 
-  const userId = req.user.id;
-
   const options = pick(req.query, ['limit', 'page', 'sortBy', 'sortOrder']);
+
+  // Guest browse: parents can view caregivers before creating an account.
+  if (!req.user?.id) {
+    const result = await serviceService.serviceBaseUser(
+      categoryId!,
+      { ...filters, role: 'find job' },
+      options,
+    );
+
+    return sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: 'Service base user fetched successfully',
+      meta: result.meta,
+      data: result.data,
+    });
+  }
+
+  const userId = req.user.id;
 
   const result = await serviceService.serviceUserBaseUser(
     userId,

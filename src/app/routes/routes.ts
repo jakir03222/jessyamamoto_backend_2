@@ -16,6 +16,7 @@ import { countryRoutes } from '../modules/countery/countery.routes';
 import { languageRoutes } from '../modules/language/language.routes';
 import { educationRoutes } from '../modules/education/education.routes';
 import { experienceRoutes } from '../modules/experience/experience.routes';
+import { adminRoutes } from '../modules/admin/admin.routes';
 
 const router = Router();
 
@@ -87,6 +88,10 @@ const moduleRoutes = [
   {
     path: '/experience',
     route: experienceRoutes,
+  },
+  {
+    path: '/admin',
+    route: adminRoutes,
   },
 ];
 

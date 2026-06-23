@@ -8,6 +8,7 @@ import Stripe from 'stripe';
 import config from '../../config';
 import mongoose from 'mongoose';
 import pagination, { IOption } from '../../helper/pagenation';
+import { APPROVED_USER_STATUS_FILTER } from '../user/user.status.util';
 
 const stripe = new Stripe(config.stripe.secretKey!);
 
@@ -142,8 +143,6 @@ const registerServiceAndSubscription = async (
                 ? Number(payload.hourRate)
                 : undefined,
             days: payload.days,
-            typeOfInterest: payload.typeOfInterest,
-            helpOfInterest: payload.helpOfInterest,
           },
         ],
         { session: dbSession },
@@ -520,6 +519,10 @@ const serviceBaseUser = async (
     status: 'pending',
   };
 
+  if (role === 'find job') {
+    match['user.userStatus'] = APPROVED_USER_STATUS_FILTER;
+  }
+
   const availableDays = getAvailableDays(available);
   if (availableDays) {
     match.days = {
@@ -746,6 +749,10 @@ const serviceUserBaseUser = async (
     status: 'pending', // only available services
   };
 
+  if (targetRole === 'find job') {
+    match['user.userStatus'] = APPROVED_USER_STATUS_FILTER;
+  }
+
   const availableDays = getAvailableDays(available);
   if (availableDays) {
     match.days = {
@@ -956,6 +963,7 @@ const getAllServiceLocations = async (query: any, userId?: string) => {
   } else if (user?.role === 'find care') {
     match['user.role'] = 'find job';
     match['user.status'] = 'active';
+    match['user.userStatus'] = APPROVED_USER_STATUS_FILTER;
     match.status = 'pending';
   }
 

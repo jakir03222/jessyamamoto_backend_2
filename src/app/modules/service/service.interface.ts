@@ -11,8 +11,6 @@ export interface IService {
   location?: string;
   lat?: number;
   lng?: number;
-  typeOfInterest?: string;
-  helpOfInterest?: string;
   hourRate?: number;
   days?: {
     day: string;

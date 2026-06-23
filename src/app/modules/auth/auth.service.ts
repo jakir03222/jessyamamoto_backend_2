@@ -11,6 +11,7 @@ import bcrypt from 'bcryptjs';
 import createOtpTemplate from '../../utils/createOtpTemplate';
 import { userRole } from '../user/user.constant';
 import { getMyServicesPaidCategoryIds } from '../user/user.service';
+import { assertLoginAllowed } from '../user/user.status.util';
 
 const registerUser = async (payload: Partial<IUser>) => {
   const exist = await User.findOne({ email: payload.email });
@@ -39,12 +40,7 @@ const loginUser = async (payload: Partial<IUser>) => {
   }
 
   if (user.role !== userRole.admin) {
-    if (user.userStatus !== 'approved') {
-      throw new AppError(
-        403,
-        `Your account is not approved by admin. Stile ${user.userStatus}`,
-      );
-    }
+    assertLoginAllowed(user.userStatus);
   }
 
   const isPasswordMatched = await bcrypt.compare(
@@ -101,6 +97,16 @@ const refreshToken = async (token: string) => {
 
   const user = await User.findById(varifiedToken.id);
   if (!user) throw new AppError(401, 'User not found');
+
+  if (user.role !== userRole.admin) {
+    if (user.status !== 'active') {
+      throw new AppError(
+        403,
+        'Your account is not active. Please contact admin.',
+      );
+    }
+    assertLoginAllowed(user.userStatus);
+  }
 
   const accessToken = jwtHelpers.genaretToken(
     {
@@ -164,6 +170,16 @@ const verifyEmail = async (email: string, otp: string) => {
 const resetPassword = async (email: string, newPassword: string) => {
   const user = await User.findOne({ email });
   if (!user) throw new AppError(404, 'User not found');
+
+  if (user.role !== userRole.admin) {
+    if (user.status !== 'active') {
+      throw new AppError(
+        403,
+        'Your account is not active. Please contact admin.',
+      );
+    }
+    assertLoginAllowed(user.userStatus);
+  }
 
   user.password = newPassword;
   (user as any).otp = undefined;

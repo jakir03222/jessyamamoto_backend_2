@@ -6,6 +6,7 @@ import {
   IUserLanguage,
   normalizeUserLanguages,
 } from './user.language.util';
+import { USER_APPROVAL_STATUS } from './user.status.util';
 
 const userLanguageSchema = new mongoose.Schema(
   {
@@ -93,9 +94,17 @@ const userSchema = new mongoose.Schema<IUser>(
     },
     userStatus: {
       type: String,
-      enum: ['approved', 'reject', 'panding'],
+      enum: [
+        USER_APPROVAL_STATUS.approved,
+        USER_APPROVAL_STATUS.pending,
+        USER_APPROVAL_STATUS.rejected,
+        'panding',
+        'reject',
+      ],
       default: function (this: IUser) {
-        return this.role === 'find job' ? 'panding' : 'approved';
+        return this.role === 'find job'
+          ? USER_APPROVAL_STATUS.pending
+          : USER_APPROVAL_STATUS.approved;
       },
     },
     gender: {

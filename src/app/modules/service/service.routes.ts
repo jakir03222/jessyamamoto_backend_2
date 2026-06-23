@@ -13,19 +13,19 @@ router.post(
 
 router.get(
   '/locations',
-  auth(userRole['find care'], userRole['find job']),
+  serviceAuth(userRole['find care'], userRole['find job']),
   serviceController.getAllServiceLocations,
 );
 
 router.get(
   '/service-base-user/:categoryId',
-  auth(userRole['find care'], userRole['find job']),
+  serviceAuth(userRole['find care'], userRole['find job']),
   serviceController.serviceBaseUserController,
 );
 
 router.get(
   '/service-user-base-user/:categoryId',
-  auth(userRole['find care'], userRole['find job']),
+  serviceAuth(userRole['find care'], userRole['find job']),
   serviceController.serviceUserBaseUserController,
 );
 

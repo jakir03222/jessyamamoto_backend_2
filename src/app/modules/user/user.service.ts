@@ -8,6 +8,8 @@ import Service from '../service/service.model';
 import { IUser } from './user.interface';
 import User from './user.model';
 import { normalizeUserLanguages } from './user.language.util';
+import { isApprovedUserStatus } from './user.status.util';
+import { userRole } from './user.constant';
 import config from '../../config';
 import { getLocationFromZip } from '../../helper/geocode';
 
@@ -149,6 +151,14 @@ const getUserById = async (id: string) => {
   if (!result) {
     throw new AppError(404, 'User not found');
   }
+
+  if (
+    result.role === userRole['find job'] &&
+    !isApprovedUserStatus(result.userStatus)
+  ) {
+    throw new AppError(404, 'User not found');
+  }
+
   return result;
 };
 

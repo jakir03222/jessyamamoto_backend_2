@@ -44,12 +44,6 @@ const ServiceSchema = new Schema<IService>(
     hourRate: {
       type: Number,
     },
-    typeOfInterest: {
-      type: String,
-    },
-    helpOfInterest: {
-      type: String,
-    },
     days: [
       {
         day: { type: String, required: true },
