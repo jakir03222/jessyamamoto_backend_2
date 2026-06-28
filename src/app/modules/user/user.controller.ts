@@ -179,6 +179,28 @@ const certificationsUpload = catchAsync(async (req, res) => {
   });
 });
 
+const switchRole = catchAsync(async (req, res) => {
+  const { role } = req.body;
+  const result = await userService.switchRole(req.user?.id, role);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Role switched successfully',
+    data: result,
+  });
+});
+
+const completeOnboarding = catchAsync(async (req, res) => {
+  const { role } = req.body;
+  const result = await userService.markOnboardingComplete(req.user?.id, role);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Onboarding completed',
+    data: result,
+  });
+});
+
 export const userController = {
   createUser,
   getAllUser,
@@ -191,4 +213,6 @@ export const userController = {
   getStripeAccount,
   uploadGalaryImages,
   certificationsUpload,
+  switchRole,
+  completeOnboarding,
 };

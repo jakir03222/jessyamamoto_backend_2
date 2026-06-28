@@ -12,6 +12,19 @@ import { isApprovedUserStatus } from './user.status.util';
 import { userRole } from './user.constant';
 import config from '../../config';
 import { getLocationFromZip } from '../../helper/geocode';
+import { jwtHelpers } from '../../helper/jwtHelpers';
+import { Secret } from 'jsonwebtoken';
+import {
+  applyRoleProfileToTopLevel,
+  assertLoginAllowedForRole,
+  ensureRoleProfile,
+  ensureUserRoles,
+  normalizeAppRole,
+  pickRoleProfileUpdates,
+  saveTopLevelToRoleProfile,
+  serializeUserWithRoles,
+} from './user.role.util';
+import { USER_APPROVAL_STATUS } from './user.status.util';
 
 /**
  * Category ids for home "My Services": categories the user registered (user.category),
@@ -199,8 +212,15 @@ const profile = async (id: string) => {
   if (!result) {
     throw new AppError(404, 'User not found');
   }
+
+  ensureUserRoles(result);
+  const activeRole = normalizeAppRole(result.role);
+  if (activeRole) {
+    applyRoleProfileToTopLevel(result, activeRole);
+  }
+
   return {
-    ...result.toObject(),
+    ...serializeUserWithRoles(result),
     myServicesPaidCategoryIds: await getMyServicesPaidCategoryIds(id),
   };
 };
@@ -300,6 +320,18 @@ const updateMyProfile = async (
     }
   }
 
+  ensureUserRoles(user);
+  const activeRole = normalizeAppRole(user.role);
+  if (activeRole) {
+    const profileUpdates = pickRoleProfileUpdates(payload);
+    const roleProfile = ensureRoleProfile(user, activeRole);
+    Object.assign(roleProfile, profileUpdates);
+    user.roleProfiles = {
+      ...(user.roleProfiles ?? {}),
+      [activeRole]: roleProfile,
+    };
+  }
+
   const result = await User.findByIdAndUpdate(id, payload, {
     new: true,
     runValidators: true,
@@ -309,7 +341,12 @@ const updateMyProfile = async (
     throw new AppError(404, 'User not found');
   }
 
-  return result;
+  if (activeRole) {
+    saveTopLevelToRoleProfile(result, activeRole);
+    await result.save();
+  }
+
+  return serializeUserWithRoles(result);
 };
 
 const uploadGalaryImages = async (
@@ -367,7 +404,7 @@ const uploadGalaryImages = async (
     throw new AppError(404, 'User not found');
   }
 
-  return result;
+  return serializeUserWithRoles(result);
 };
 
 const certificationsUpload = async (
@@ -525,6 +562,104 @@ const getStripeAccount = async (userId: string) => {
   }
 };
 
+const getRoleApprovalStatusForUser = (
+  user: InstanceType<typeof User>,
+  role: ReturnType<typeof normalizeAppRole>,
+): string => {
+  const map = user.roleStatus ?? {};
+  if (role && map[role]) return String(map[role]);
+  if (role === userRole['find care']) return USER_APPROVAL_STATUS.approved;
+  return user.userStatus ?? USER_APPROVAL_STATUS.pending;
+};
+
+const switchRole = async (userId: string, targetRoleRaw: string) => {
+  const targetRole = normalizeAppRole(targetRoleRaw);
+  if (!targetRole || targetRole === userRole.admin) {
+    throw new AppError(400, 'Invalid role');
+  }
+
+  const user = await User.findById(userId);
+  if (!user) throw new AppError(404, 'User not found');
+
+  ensureUserRoles(user);
+  if (!user.roles?.includes(targetRole)) {
+    throw new AppError(
+      400,
+      'This role is not registered for your account. Complete signup for that role first.',
+    );
+  }
+
+  const currentRole = normalizeAppRole(user.role);
+  if (currentRole) {
+    saveTopLevelToRoleProfile(user, currentRole);
+  }
+
+  user.role = targetRole;
+  applyRoleProfileToTopLevel(user, targetRole);
+  user.userStatus = getRoleApprovalStatusForUser(
+    user,
+    targetRole,
+  ) as NonNullable<IUser['userStatus']>;
+  await user.save();
+
+  assertLoginAllowedForRole(user, targetRole);
+
+  const tokenPayload = {
+    id: user._id,
+    role: user.role,
+    roles: user.roles ?? [user.role],
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName || '',
+    gender: user.gender,
+    subscription: user.isSubscription,
+  };
+
+  const accessToken = jwtHelpers.genaretToken(
+    tokenPayload,
+    config.jwt.accessTokenSecret as Secret,
+    config.jwt.accessTokenExpires,
+  );
+  const refreshToken = jwtHelpers.genaretToken(
+    tokenPayload,
+    config.jwt.refreshTokenSecret as Secret,
+    config.jwt.refreshTokenExpires,
+  );
+
+  const myServicesPaidCategoryIds = await getMyServicesPaidCategoryIds(userId);
+
+  return {
+    accessToken,
+    refreshToken,
+    user: {
+      ...serializeUserWithRoles(user),
+      myServicesPaidCategoryIds,
+    },
+  };
+};
+
+const markOnboardingComplete = async (userId: string, roleRaw?: string) => {
+  const user = await User.findById(userId);
+  if (!user) throw new AppError(404, 'User not found');
+
+  const role = normalizeAppRole(roleRaw || user.role);
+  if (!role) throw new AppError(400, 'Invalid role');
+
+  const profile = ensureRoleProfile(user, role);
+  profile.onboardingCompleted = true;
+  user.roleProfiles = {
+    ...(user.roleProfiles ?? {}),
+    [role]: profile,
+  };
+
+  if (user.role === role) {
+    applyRoleProfileToTopLevel(user, role);
+  }
+
+  await user.save();
+  return serializeUserWithRoles(user);
+};
+
 export const userService = {
   createUser,
   getAllUser,
@@ -538,4 +673,6 @@ export const userService = {
   getMyServicesPaidCategoryIds,
   uploadGalaryImages,
   certificationsUpload,
+  switchRole,
+  markOnboardingComplete,
 };

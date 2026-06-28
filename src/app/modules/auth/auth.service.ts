@@ -11,7 +11,55 @@ import bcrypt from 'bcryptjs';
 import createOtpTemplate from '../../utils/createOtpTemplate';
 import { userRole } from '../user/user.constant';
 import { getMyServicesPaidCategoryIds } from '../user/user.service';
-import { assertLoginAllowed } from '../user/user.status.util';
+import {
+  assertLoginAllowedForRole,
+  ensureUserRoles,
+  normalizeAppRole,
+  serializeUserWithRoles,
+} from '../user/user.role.util';
+
+const buildTokenPayload = (user: InstanceType<typeof User>) => {
+  ensureUserRoles(user);
+  return {
+    id: user._id,
+    role: user.role,
+    roles: user.roles ?? [user.role],
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName || '',
+    gender: user.gender,
+    subscription: user.isSubscription,
+  };
+};
+
+const buildAuthResponse = async (user: InstanceType<typeof User>) => {
+  const tokenPayload = buildTokenPayload(user);
+  const accessToken = jwtHelpers.genaretToken(
+    tokenPayload,
+    config.jwt.accessTokenSecret as Secret,
+    config.jwt.accessTokenExpires,
+  );
+  const refreshToken = jwtHelpers.genaretToken(
+    tokenPayload,
+    config.jwt.refreshTokenSecret as Secret,
+    config.jwt.refreshTokenExpires,
+  );
+
+  const { password, ...userWithoutPassword } = user.toObject();
+  const myServicesPaidCategoryIds = await getMyServicesPaidCategoryIds(
+    user._id.toString(),
+  );
+
+  return {
+    accessToken,
+    refreshToken,
+    user: {
+      ...serializeUserWithRoles(user),
+      ...userWithoutPassword,
+      myServicesPaidCategoryIds,
+    },
+  };
+};
 
 const registerUser = async (payload: Partial<IUser>) => {
   const exist = await User.findOne({ email: payload.email });
@@ -30,17 +78,11 @@ const loginUser = async (payload: Partial<IUser>) => {
   if (!user) throw new AppError(401, 'User not found');
   if (!payload.password) throw new AppError(400, 'Password is required');
 
-  if (user.role !== userRole.admin) {
-    if (user.status !== 'active') {
-      throw new AppError(
-        403,
-        'Your account is not active. Please contact admin.',
-      );
-    }
-  }
+  const activeRole = normalizeAppRole(user.role);
+  if (!activeRole) throw new AppError(400, 'Invalid user role');
 
-  if (user.role !== userRole.admin) {
-    assertLoginAllowed(user.userStatus);
+  if (activeRole !== userRole.admin) {
+    assertLoginAllowedForRole(user, activeRole);
   }
 
   const isPasswordMatched = await bcrypt.compare(
@@ -48,45 +90,8 @@ const loginUser = async (payload: Partial<IUser>) => {
     user.password,
   );
   if (!isPasswordMatched) throw new AppError(401, 'Password not matched');
-  // if (!user.verified) throw new AppError(403, 'Please verify your email first');
 
-  const accessToken = jwtHelpers.genaretToken(
-    {
-      id: user._id,
-      role: user.role,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName || '',
-      gender: user.gender,
-      subscription: user.isSubscription,
-    },
-    config.jwt.accessTokenSecret as Secret,
-    config.jwt.accessTokenExpires,
-  );
-
-  const refreshToken = jwtHelpers.genaretToken(
-    {
-      id: user._id,
-      role: user.role,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName || '',
-      gender: user.gender,
-      subscription: user.isSubscription,
-    },
-    config.jwt.refreshTokenSecret as Secret,
-    config.jwt.refreshTokenExpires,
-  );
-
-  const { password, ...userWithoutPassword } = user.toObject();
-  const myServicesPaidCategoryIds = await getMyServicesPaidCategoryIds(
-    user._id.toString(),
-  );
-  return {
-    accessToken,
-    refreshToken,
-    user: { ...userWithoutPassword, myServicesPaidCategoryIds },
-  };
+  return buildAuthResponse(user);
 };
 
 const refreshToken = async (token: string) => {
@@ -98,26 +103,16 @@ const refreshToken = async (token: string) => {
   const user = await User.findById(varifiedToken.id);
   if (!user) throw new AppError(401, 'User not found');
 
-  if (user.role !== userRole.admin) {
-    if (user.status !== 'active') {
-      throw new AppError(
-        403,
-        'Your account is not active. Please contact admin.',
-      );
-    }
-    assertLoginAllowed(user.userStatus);
+  const activeRole = normalizeAppRole(user.role);
+  if (!activeRole) throw new AppError(400, 'Invalid user role');
+
+  if (activeRole !== userRole.admin) {
+    assertLoginAllowedForRole(user, activeRole);
   }
 
+  const tokenPayload = buildTokenPayload(user);
   const accessToken = jwtHelpers.genaretToken(
-    {
-      id: user._id,
-      role: user.role,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName || '',
-      gender: user.gender,
-      subscription: user.isSubscription,
-    },
+    tokenPayload,
     config.jwt.accessTokenSecret as Secret,
     config.jwt.accessTokenExpires,
   );
@@ -126,9 +121,14 @@ const refreshToken = async (token: string) => {
   const myServicesPaidCategoryIds = await getMyServicesPaidCategoryIds(
     user._id.toString(),
   );
+
   return {
     accessToken,
-    user: { ...userWithoutPassword, myServicesPaidCategoryIds },
+    user: {
+      ...serializeUserWithRoles(user),
+      ...userWithoutPassword,
+      myServicesPaidCategoryIds,
+    },
   };
 };
 
@@ -138,7 +138,7 @@ const forgotPassword = async (email: string) => {
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   user.otp = otp;
-  user.otpExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
+  user.otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
   await user.save();
 
   await sendMailer(
@@ -148,7 +148,6 @@ const forgotPassword = async (email: string) => {
   );
 
   return { message: 'OTP sent to your email' };
-  // return user;
 };
 
 const verifyEmail = async (email: string, otp: string) => {
@@ -171,14 +170,9 @@ const resetPassword = async (email: string, newPassword: string) => {
   const user = await User.findOne({ email });
   if (!user) throw new AppError(404, 'User not found');
 
-  if (user.role !== userRole.admin) {
-    if (user.status !== 'active') {
-      throw new AppError(
-        403,
-        'Your account is not active. Please contact admin.',
-      );
-    }
-    assertLoginAllowed(user.userStatus);
+  const activeRole = normalizeAppRole(user.role);
+  if (activeRole && activeRole !== userRole.admin) {
+    assertLoginAllowedForRole(user, activeRole);
   }
 
   user.password = newPassword;
@@ -186,43 +180,7 @@ const resetPassword = async (email: string, newPassword: string) => {
   (user as any).otpExpiry = undefined;
   await user.save();
 
-  // Auto-login after reset
-  const accessToken = jwtHelpers.genaretToken(
-    {
-      id: user._id,
-      role: user.role,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName || '',
-      gender: user.gender,
-      subscription: user.isSubscription,
-    },
-    config.jwt.accessTokenSecret as Secret,
-    config.jwt.accessTokenExpires,
-  );
-  const refreshToken = jwtHelpers.genaretToken(
-    {
-      id: user._id,
-      role: user.role,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName || '',
-      gender: user.gender,
-      subscription: user.isSubscription,
-    },
-    config.jwt.refreshTokenSecret as Secret,
-    config.jwt.refreshTokenExpires,
-  );
-
-  const { password, ...userWithoutPassword } = user.toObject();
-  const myServicesPaidCategoryIds = await getMyServicesPaidCategoryIds(
-    user._id.toString(),
-  );
-  return {
-    accessToken,
-    refreshToken,
-    user: { ...userWithoutPassword, myServicesPaidCategoryIds },
-  };
+  return buildAuthResponse(user);
 };
 
 const changePassword = async (
@@ -238,7 +196,6 @@ const changePassword = async (
     throw new AppError(400, 'Old password is incorrect');
   }
 
-  // prevent same password
   if (oldPassword === newPassword) {
     throw new AppError(400, 'New password must be different');
   }

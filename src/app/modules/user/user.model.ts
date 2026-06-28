@@ -49,6 +49,19 @@ const userSchema = new mongoose.Schema<IUser>(
       enum: ['find job', 'find care', 'admin'],
       required: true,
     },
+    roles: {
+      type: [String],
+      enum: ['find job', 'find care', 'admin'],
+      default: undefined,
+    },
+    roleProfiles: {
+      type: mongoose.Schema.Types.Mixed,
+      default: undefined,
+    },
+    roleStatus: {
+      type: mongoose.Schema.Types.Mixed,
+      default: undefined,
+    },
     profileImage: String,
     bio: String,
     phone: String,
@@ -151,6 +164,11 @@ userSchema.pre('save', function (next) {
   }
   if (Array.isArray(this.language) && this.language.length > 0) {
     this.language = normalizeUserLanguages(this.language) as IUserLanguage[];
+  }
+  if (!Array.isArray(this.roles) || this.roles.length === 0) {
+    this.roles = [this.role];
+  } else if (!this.roles.includes(this.role)) {
+    this.roles = [...new Set([this.role, ...this.roles])];
   }
   next();
 });

@@ -9,6 +9,17 @@ import config from '../../config';
 import mongoose from 'mongoose';
 import pagination, { IOption } from '../../helper/pagenation';
 import { APPROVED_USER_STATUS_FILTER } from '../user/user.status.util';
+import { userRole } from '../user/user.constant';
+import {
+  addOrUpdateUserRole,
+  applyRoleProfileToTopLevel,
+  assertRegistrationPayload,
+  ensureRoleProfile,
+  ensureUserRoles,
+  mergeRegistrationPayloadIntoRoleProfile,
+  normalizeAppRole,
+  verifyExistingUserPassword,
+} from '../user/user.role.util';
 
 const stripe = new Stripe(config.stripe.secretKey!);
 
@@ -50,36 +61,72 @@ const registerServiceAndSubscription = async (
   payload: any,
   userId?: string,
 ) => {
+  const registration = assertRegistrationPayload(payload);
+  const requestedRole = registration.role;
+  const serviceFirstName = registration.firstName;
+  const serviceLastName = registration.lastName;
+
   /* ================= GET OR CREATE USER ================= */
   let user = null;
 
   if (userId) {
     user = await User.findById(userId);
     if (!user) throw new AppError(404, 'User not found');
+    await addOrUpdateUserRole(user, requestedRole, payload, {
+      makeActive: true,
+    });
   } else {
-    // First-time user
-    if (!payload.email || !payload.firstName || !payload.role) {
-      throw new AppError(
-        400,
-        'Email, firstName and role are required for new users',
+    user = await User.findOne({ email: registration.email.toLowerCase() });
+    if (user) {
+      await verifyExistingUserPassword(
+        user,
+        payload.password,
+        async (id) => {
+          const withPassword = await User.findById(id).select('+password');
+          return withPassword?.password ?? null;
+        },
       );
-    }
+      await addOrUpdateUserRole(user, requestedRole, payload, {
+        makeActive: true,
+      });
+    } else {
+      if (!payload.password || !String(payload.password).trim()) {
+        throw new AppError(400, 'Password is required');
+      }
 
-    user = await User.findOne({ email: payload.email });
-    if (!user) {
+      const roleProfile = {
+        firstName: serviceFirstName,
+        lastName: serviceLastName,
+        gender: payload.gender ? String(payload.gender).trim() : '',
+        countery: payload.countery || payload.country || '',
+        city: payload.city || '',
+        location: payload.location || '',
+      };
+
       user = await User.create({
-        email: payload.email,
-        password: payload.password || 'defaultpassword',
-        firstName: payload.firstName,
-        lastName: payload.lastName || '',
-        role: payload.role,
+        email: registration.email.toLowerCase(),
+        password: payload.password,
+        firstName: serviceFirstName,
+        lastName: serviceLastName,
+        role: requestedRole,
+        roles: [requestedRole],
+        roleProfiles: {
+          [requestedRole]: roleProfile,
+        },
+        gender: payload.gender ? String(payload.gender).trim() : '',
         countery: payload.countery || payload.country || '',
         city: payload.city || '',
         location: payload.location || '',
         NIDNumber: payload.NIDNumber || '',
       });
+      ensureUserRoles(user);
+      ensureRoleProfile(user, requestedRole);
     }
   }
+
+  ensureUserRoles(user);
+  applyRoleProfileToTopLevel(user, requestedRole);
+  const serviceRole = requestedRole;
 
   /* ================= EACH CATEGORY = ITS OWN STRIPE PAYMENT ================= */
   if (!payload.categoryId) {
@@ -135,11 +182,11 @@ const registerServiceAndSubscription = async (
             location: loc,
             zip: payload.zip ? String(payload.zip) : undefined,
             email: user.email,
-            firstName: user.firstName,
-            lastName: user.lastName,
+            firstName: serviceFirstName,
+            lastName: serviceLastName,
             gender,
             hourRate:
-              user.role === 'find job' && payload.hourRate != null
+              serviceRole === 'find job' && payload.hourRate != null
                 ? Number(payload.hourRate)
                 : undefined,
             days: payload.days,
@@ -163,7 +210,7 @@ const registerServiceAndSubscription = async (
 
       await Category.findByIdAndUpdate(
         categoryObjectId,
-        user.role === 'find care'
+        serviceRole === 'find care'
           ? { $addToSet: { findCareUser: user._id } }
           : { $addToSet: { findJobUser: user._id } },
         { session: dbSession },

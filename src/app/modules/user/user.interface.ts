@@ -1,8 +1,10 @@
 import { Types } from 'mongoose';
 import { IUserLanguage } from './user.language.util';
+import { IRoleProfile } from './user.role.util';
 
 export type { IUserLanguage, LanguageProficiency } from './user.language.util';
 export { LANGUAGE_PROFICIENCY_LEVELS } from './user.language.util';
+export type { IRoleProfile } from './user.role.util';
 
 export interface IUser {
   firstName: string;
@@ -10,6 +12,12 @@ export interface IUser {
   email: string;
   password: string;
   role: 'find job' | 'find care' | 'admin';
+  /** All roles this account can switch between. */
+  roles?: ('find job' | 'find care' | 'admin')[];
+  /** Per-role profile data (bio, photo, skills, etc.). */
+  roleProfiles?: Record<string, IRoleProfile>;
+  /** Per-role approval status. */
+  roleStatus?: Record<string, string>;
   profileImage?: string | string[];
   bio?: string;
   phone?: string;

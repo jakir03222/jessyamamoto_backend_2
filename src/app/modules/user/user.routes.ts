@@ -38,6 +38,16 @@ router.put(
   ]),
   userController.updateMyProfile,
 );
+router.post(
+  '/switch-role',
+  auth(userRole.admin, userRole['find care'], userRole['find job']),
+  userController.switchRole,
+);
+router.post(
+  '/complete-onboarding',
+  auth(userRole.admin, userRole['find care'], userRole['find job']),
+  userController.completeOnboarding,
+);
 router.get('/all-user', auth(userRole.admin), userController.getAllUser);
 router.patch(
   '/update-galary',

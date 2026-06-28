@@ -29,7 +29,11 @@ export const auth = (...role: string[]) => {
         role.length &&
         (!varifiedToken ||
           !varifiedToken.role ||
-          !role.includes(varifiedToken.role))
+          !(
+            role.includes(varifiedToken.role) ||
+            (Array.isArray(varifiedToken.roles) &&
+              varifiedToken.roles.some((r: string) => role.includes(r)))
+          ))
       ) {
         throw new AppError(
           401,
@@ -63,7 +67,12 @@ export const serviceAuth = (...roles: string[]) => {
 
       if (
         roles.length &&
-        (!verifiedToken.role || !roles.includes(verifiedToken.role))
+        verifiedToken.role &&
+        !(
+          roles.includes(verifiedToken.role) ||
+          (Array.isArray(verifiedToken.roles) &&
+            verifiedToken.roles.some((r: string) => roles.includes(r)))
+        )
       ) {
         throw new AppError(403, 'Forbidden');
       }
@@ -71,7 +80,8 @@ export const serviceAuth = (...roles: string[]) => {
       req.user = verifiedToken;
       next();
     } catch (error) {
-      next(error);
+      req.user = undefined;
+      next();
     }
   };
 };

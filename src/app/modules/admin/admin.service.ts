@@ -8,6 +8,7 @@ import {
   PENDING_USER_STATUS_FILTER,
   USER_APPROVAL_STATUS,
 } from '../user/user.status.util';
+import { setRoleApprovalStatus } from '../user/user.role.util';
 
 const workerSelectFields =
   'firstName lastName email profileImage bio phone gender countery city location experienceLevel status userStatus verified createdAt updatedAt category service';
@@ -70,6 +71,7 @@ const approveWorker = async (workerId: string) => {
 
   worker.userStatus = USER_APPROVAL_STATUS.approved;
   worker.status = 'active';
+  setRoleApprovalStatus(worker, userRole['find job'], USER_APPROVAL_STATUS.approved);
   await worker.save();
 
   const { password, otp, otpExpiry, ...workerWithoutSensitiveFields } =
@@ -88,6 +90,7 @@ const rejectWorker = async (workerId: string) => {
 
   worker.userStatus = USER_APPROVAL_STATUS.rejected;
   worker.status = 'inactive';
+  setRoleApprovalStatus(worker, userRole['find job'], USER_APPROVAL_STATUS.rejected);
   await worker.save();
 
   const { password, otp, otpExpiry, ...workerWithoutSensitiveFields } =
