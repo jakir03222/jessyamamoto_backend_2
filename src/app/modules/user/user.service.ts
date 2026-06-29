@@ -13,6 +13,7 @@ import { userRole } from './user.constant';
 import config from '../../config';
 import { getLocationFromZip } from '../../helper/geocode';
 import { jwtHelpers } from '../../helper/jwtHelpers';
+import { stringifyUserId } from '../../helper/jwtUser.util';
 import { Secret } from 'jsonwebtoken';
 import {
   applyRoleProfileToTopLevel,
@@ -205,10 +206,17 @@ const deleteUserById = async (id: string) => {
   return result;
 };
 
-const profile = async (id: string) => {
-  const result = await User.findById(id)
+const profile = async (id: string, email?: string) => {
+  let result = await User.findById(id)
     .populate('totalBooking')
     .populate('givenReviewRatting');
+
+  if (!result && email?.trim()) {
+    result = await User.findOne({ email: email.trim().toLowerCase() })
+      .populate('totalBooking')
+      .populate('givenReviewRatting');
+  }
+
   if (!result) {
     throw new AppError(404, 'User not found');
   }
@@ -394,14 +402,31 @@ const uploadGalaryImages = async (
       : undefined,
   );
 
+  ensureUserRoles(user);
+  const activeRole = normalizeAppRole(user.role);
+  if (activeRole) {
+    const roleProfile = ensureRoleProfile(user, activeRole);
+    roleProfile.galary = [...galary];
+    roleProfile.profileImage = profileImage;
+    user.roleProfiles = {
+      ...(user.roleProfiles ?? {}),
+      [activeRole]: roleProfile,
+    };
+  }
+
   const result = await User.findByIdAndUpdate(
     userId,
-    { galary, profileImage },
+    { galary, profileImage, ...(activeRole ? { roleProfiles: user.roleProfiles } : {}) },
     { new: true },
   );
 
   if (!result) {
     throw new AppError(404, 'User not found');
+  }
+
+  if (activeRole) {
+    saveTopLevelToRoleProfile(result, activeRole);
+    await result.save();
   }
 
   return serializeUserWithRoles(result);
@@ -421,15 +446,39 @@ const certificationsUpload = async (
     const uploadedFiles = await Promise.all(
       files.map((file) => fileUploader.uploadToCloudinary(file)),
     );
+    const newUrls = uploadedFiles.map((file) => file.url);
+    const existingUrls = Array.isArray(user.certifications)
+      ? user.certifications.map((u) => String(u))
+      : [];
+    payload.certifications = [...existingUrls, ...newUrls];
+  }
 
-    payload.certifications = uploadedFiles.map((file) => file.url);
+  ensureUserRoles(user);
+  const activeRole = normalizeAppRole(user.role);
+  if (activeRole && payload.certifications) {
+    const roleProfile = ensureRoleProfile(user, activeRole);
+    roleProfile.certifications = [...payload.certifications];
+    user.roleProfiles = {
+      ...(user.roleProfiles ?? {}),
+      [activeRole]: roleProfile,
+    };
+    payload.roleProfiles = user.roleProfiles;
   }
 
   const result = await User.findByIdAndUpdate(userId, payload, {
     new: true,
   });
 
-  return result;
+  if (!result) {
+    throw new AppError(404, 'User not found');
+  }
+
+  if (activeRole) {
+    saveTopLevelToRoleProfile(result, activeRole);
+    await result.save();
+  }
+
+  return serializeUserWithRoles(result);
 };
 
 const stripe = new Stripe(config.stripe.secretKey!);
@@ -605,7 +654,7 @@ const switchRole = async (userId: string, targetRoleRaw: string) => {
   assertLoginAllowedForRole(user, targetRole);
 
   const tokenPayload = {
-    id: user._id,
+    id: stringifyUserId(user._id),
     role: user.role,
     roles: user.roles ?? [user.role],
     email: user.email,

@@ -20,6 +20,11 @@ import {
   normalizeAppRole,
   verifyExistingUserPassword,
 } from '../user/user.role.util';
+import { authService } from '../auth/auth.service';
+import {
+  normalizeLocationFields,
+  validateCityForCountry,
+} from '../../helper/locationValidation';
 
 const stripe = new Stripe(config.stripe.secretKey!);
 
@@ -55,6 +60,19 @@ const getAvailableDays = (available?: string | string[]) => {
   }
 
   throw new AppError(400, 'available must be today, week, or thisWeek');
+};
+
+const normalizeCategoryIds = (payload: Record<string, unknown>): string[] => {
+  const fromArray = payload.categoryIds;
+  if (Array.isArray(fromArray)) {
+    const ids = fromArray
+      .map((id) => String(id || '').trim())
+      .filter((id) => id.length > 0);
+    if (ids.length > 0) return [...new Set(ids)];
+  }
+
+  const single = String(payload.categoryId || '').trim();
+  return single ? [single] : [];
 };
 
 const registerServiceAndSubscription = async (
@@ -128,25 +146,46 @@ const registerServiceAndSubscription = async (
   applyRoleProfileToTopLevel(user, requestedRole);
   const serviceRole = requestedRole;
 
-  /* ================= EACH CATEGORY = ITS OWN STRIPE PAYMENT ================= */
-  if (!payload.categoryId) {
+  const { country, city, location } = normalizeLocationFields(payload);
+  if (country) {
+    await validateCityForCountry(country, city);
+  }
+
+  payload.countery = country;
+  payload.country = country;
+  payload.city = city;
+  payload.location = location;
+
+  const activeProfile = ensureRoleProfile(user, requestedRole);
+  mergeRegistrationPayloadIntoRoleProfile(activeProfile, payload);
+  user.countery = country;
+  user.city = city;
+  user.location = location;
+  user.roleProfiles = {
+    ...(user.roleProfiles ?? {}),
+    [requestedRole]: activeProfile,
+  };
+  await user.save();
+
+  const categoryIds = normalizeCategoryIds(payload);
+  if (categoryIds.length === 0) {
     throw new AppError(400, 'categoryId is required');
   }
-  if (!mongoose.Types.ObjectId.isValid(payload.categoryId)) {
-    throw new AppError(400, 'Invalid categoryId');
+  for (const categoryId of categoryIds) {
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      throw new AppError(400, 'Invalid categoryId');
+    }
   }
-  const categoryObjectId = new mongoose.Types.ObjectId(payload.categoryId);
 
-  const existingInCategory = await Service.findOne({
-    userId: user._id,
-    categoryId: categoryObjectId,
-  });
-  if (existingInCategory) {
+  /* ================= EACH CATEGORY = ITS OWN STRIPE PAYMENT ================= */
+  if (categoryIds.length > 1 && payload.subscriptionId) {
     throw new AppError(
       400,
-      'You already have a service in this category. Each additional category requires a separate payment.',
+      'Multiple categories require separate registrations when using a paid plan',
     );
   }
+
+  const categoryObjectId = new mongoose.Types.ObjectId(categoryIds[0]!);
 
   const effectiveSubscriptionId =
     payload.subscriptionId != null &&
@@ -165,56 +204,70 @@ const registerServiceAndSubscription = async (
       throw new AppError(400, 'gender is required');
     }
 
-    const categoryDoc = await Category.findById(categoryObjectId);
-    if (!categoryDoc) throw new AppError(404, 'Category not found');
-
-    const loc = payload.location || payload.city || '';
+    const loc = location || city || country || '';
 
     const dbSession = await mongoose.startSession();
     dbSession.startTransaction();
-    let createdService: InstanceType<typeof Service> | null = null;
+    const createdServices: InstanceType<typeof Service>[] = [];
     try {
-      const [created] = await Service.create(
-        [
+      for (const categoryId of categoryIds) {
+        const categoryOid = new mongoose.Types.ObjectId(categoryId);
+        const category = await Category.findById(categoryOid).session(dbSession);
+        if (!category) throw new AppError(404, 'Category not found');
+
+        const existingInCategory = await Service.findOne({
+          userId: user._id,
+          categoryId: categoryOid,
+        }).session(dbSession);
+        if (existingInCategory) {
+          throw new AppError(
+            400,
+            'You already have a service in this category. Each additional category requires a separate payment.',
+          );
+        }
+
+        const [created] = await Service.create(
+          [
+            {
+              userId: user._id,
+              categoryId: categoryOid,
+              location: loc,
+              zip: payload.zip ? String(payload.zip) : undefined,
+              email: user.email,
+              firstName: serviceFirstName,
+              lastName: serviceLastName,
+              gender,
+              hourRate:
+                serviceRole === 'find job' && payload.hourRate != null
+                  ? Number(payload.hourRate)
+                  : undefined,
+              days: payload.days,
+            },
+          ],
+          { session: dbSession },
+        );
+        createdServices.push(created!);
+
+        await User.findByIdAndUpdate(
+          user._id,
           {
-            userId: user._id,
-            categoryId: categoryObjectId,
-            location: loc,
-            zip: payload.zip ? String(payload.zip) : undefined,
-            email: user.email,
-            firstName: serviceFirstName,
-            lastName: serviceLastName,
-            gender,
-            hourRate:
-              serviceRole === 'find job' && payload.hourRate != null
-                ? Number(payload.hourRate)
-                : undefined,
-            days: payload.days,
+            $addToSet: {
+              category: categoryOid,
+              service: created!._id,
+            },
+            ...(loc ? { location: loc, countery: country, city } : {}),
           },
-        ],
-        { session: dbSession },
-      );
-      createdService = created!;
+          { session: dbSession },
+        );
 
-      await User.findByIdAndUpdate(
-        user._id,
-        {
-          $addToSet: {
-            category: categoryObjectId,
-            service: created!._id,
-          },
-          ...(loc ? { location: loc } : {}),
-        },
-        { session: dbSession },
-      );
-
-      await Category.findByIdAndUpdate(
-        categoryObjectId,
-        serviceRole === 'find care'
-          ? { $addToSet: { findCareUser: user._id } }
-          : { $addToSet: { findJobUser: user._id } },
-        { session: dbSession },
-      );
+        await Category.findByIdAndUpdate(
+          categoryOid,
+          serviceRole === 'find care'
+            ? { $addToSet: { findCareUser: user._id } }
+            : { $addToSet: { findJobUser: user._id } },
+          { session: dbSession },
+        );
+      }
 
       await dbSession.commitTransaction();
     } catch (e) {
@@ -224,9 +277,18 @@ const registerServiceAndSubscription = async (
       dbSession.endSession();
     }
 
+    const freshUser = await User.findById(user._id);
+    if (!freshUser) throw new AppError(404, 'User not found');
+    applyRoleProfileToTopLevel(freshUser, requestedRole);
+    const auth = await authService.buildAuthResponse(freshUser);
+
     return {
-      service: createdService,
+      service: createdServices.length === 1 ? createdServices[0] : createdServices,
+      services: createdServices,
       checkoutUrl: null,
+      accessToken: auth.accessToken,
+      refreshToken: auth.refreshToken,
+      user: auth.user,
     };
   }
 

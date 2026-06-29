@@ -1,6 +1,7 @@
 import catchAsync from '../../utils/catchAsycn';
 import sendResponse from '../../utils/sendResponse';
 import pick from '../../helper/pick';
+import { requireAuthUserId } from '../../helper/jwtUser.util';
 import { userService } from './user.service';
 
 const createUser = catchAsync(async (req, res) => {
@@ -84,7 +85,10 @@ const deleteUserById = catchAsync(async (req, res) => {
 });
 
 const profile = catchAsync(async (req, res) => {
-  const result = await userService.profile(req.user.id);
+  const userId = requireAuthUserId(req.user as Record<string, unknown>);
+  const email =
+    typeof req.user?.email === 'string' ? req.user.email : undefined;
+  const result = await userService.profile(userId, email);
   sendResponse(res, {
     statusCode: 200,
     success: true,

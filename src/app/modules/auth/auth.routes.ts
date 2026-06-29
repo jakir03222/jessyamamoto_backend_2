@@ -10,6 +10,7 @@ router.post('/register', authController.registerUser);
 router.post('/login', authController.loginUser);
 router.post('/refresh-token', authController.refreshToken);
 router.post('/forgot-password', authController.forgotPassword);
+router.post('/verify-forgot-password-otp', authController.verifyForgotPasswordOtp);
 router.post('/verify-email', authController.verifyEmail);
 router.post('/reset-password', authController.resetPassword);
 router.post('/logout', authController.logoutUser);
