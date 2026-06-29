@@ -4,6 +4,42 @@ import AppError from '../../error/appError';
 import { IOption } from '../../helper/pagenation';
 import pagination from '../../helper/pagenation';
 
+const DEFAULT_SUBSCRIPTIONS: Omit<ISubscription, 'totalSubscripeUser' | 'totalServices'>[] = [
+  {
+    type: 'monthly',
+    title: 'Monthly Starter Membership',
+    price: 24.99,
+    description: '$24.99 per month',
+    content:
+      'Member Trusted Platform Fee: 12.5%,Rank higher in search results,Premium badge on your profile,Find trusted care and apply for jobs',
+  },
+  {
+    type: 'six_month',
+    title: '6 Month Membership',
+    price: 129.99,
+    description: '$129.99 every 6 months',
+    content:
+      'Member Trusted Platform Fee: 12.5%,Save vs monthly billing,Premium badge on your profile,Find trusted care and apply for jobs',
+  },
+  {
+    type: 'yearly',
+    title: 'Annual Membership',
+    price: 249.99,
+    description: '$249.99 per year',
+    content:
+      'Member Trusted Platform Fee: 12.5%,Best value — save vs monthly,Premium badge on your profile,Find trusted care and apply for jobs',
+  },
+];
+
+const ensureDefaultSubscriptions = async () => {
+  for (const plan of DEFAULT_SUBSCRIPTIONS) {
+    await Subscription.findOneAndUpdate(
+      { type: plan.type },
+      { $set: plan },
+      { upsert: true, new: true },
+    );
+  }
+};
 
 const createSubscription = async (payload: ISubscription) => {
   const result = await Subscription.create(payload);
@@ -16,6 +52,8 @@ const createSubscription = async (payload: ISubscription) => {
 };
 
 const getAllSubscriptions = async (params: any, options: IOption) => {
+  await ensureDefaultSubscriptions();
+
   const { page, limit, skip, sortBy, sortOrder } = pagination(options);
   const { searchTerm, ...filterData } = params;
 

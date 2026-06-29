@@ -203,8 +203,10 @@ export const mergeRegistrationPayloadIntoRoleProfile = (
   if (payload.countery || payload.country) {
     profile.countery = String(payload.countery || payload.country).trim();
   }
-  if (payload.city) profile.city = String(payload.city).trim();
-  if (payload.location) profile.location = String(payload.location).trim();
+  if (payload.city != null) profile.city = String(payload.city).trim();
+  if (payload.location != null) {
+    profile.location = String(payload.location).trim();
+  }
 };
 
 export const getRoleApprovalStatus = (
