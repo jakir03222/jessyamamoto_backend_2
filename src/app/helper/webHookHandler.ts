@@ -166,7 +166,12 @@ const webHookHandler = async (req: Request, res: Response) => {
           }
 
           // Calculate expiry
-          const months = subscription.type === 'yearly' ? 12 : 1;
+          const months =
+            subscription.type === 'yearly'
+              ? 12
+              : subscription.type === 'six_month'
+                ? 6
+                : 1;
           const expiry = new Date();
           expiry.setMonth(expiry.getMonth() + months);
 

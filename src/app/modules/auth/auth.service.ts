@@ -17,11 +17,12 @@ import {
   normalizeAppRole,
   serializeUserWithRoles,
 } from '../user/user.role.util';
+import { stringifyUserId } from '../../helper/jwtUser.util';
 
 const buildTokenPayload = (user: InstanceType<typeof User>) => {
   ensureUserRoles(user);
   return {
-    id: user._id,
+    id: stringifyUserId(user._id),
     role: user.role,
     roles: user.roles ?? [user.role],
     email: user.email,
@@ -95,7 +96,12 @@ const loginUser = async (payload: Partial<IUser>) => {
 };
 
 const refreshToken = async (token: string) => {
+  if (!token || typeof token !== 'string' || !token.trim()) {
+    throw new AppError(401, 'Refresh token is required');
+  }
+
   const varifiedToken = jwtHelpers.verifyToken(
+    token.trim(),
     token,
     config.jwt.refreshTokenSecret as Secret,
   ) as JwtPayload;
@@ -133,7 +139,8 @@ const refreshToken = async (token: string) => {
 };
 
 const forgotPassword = async (email: string) => {
-  const user = await User.findOne({ email });
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const user = await User.findOne({ email: normalizedEmail });
   if (!user) throw new AppError(401, 'User not found');
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -166,16 +173,46 @@ const verifyEmail = async (email: string, otp: string) => {
   return { message: 'Email verified successfully' };
 };
 
-const resetPassword = async (email: string, newPassword: string) => {
-  const user = await User.findOne({ email });
+const assertForgotPasswordOtp = (user: IUser, otp: string) => {
+  const code = String(otp || '').trim();
+  if (!code) throw new AppError(400, 'OTP is required');
+  if (user.otp !== code || !user.otpExpiry || user.otpExpiry < new Date()) {
+    throw new AppError(400, 'Invalid or expired OTP');
+  }
+};
+
+const verifyForgotPasswordOtp = async (email: string, otp: string) => {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const user = await User.findOne({ email: normalizedEmail });
+  if (!user) throw new AppError(401, 'User not found');
+
+  assertForgotPasswordOtp(user, otp);
+
+  return { message: 'OTP verified' };
+};
+
+const resetPassword = async (
+  email: string,
+  otp: string,
+  newPassword: string,
+) => {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const user = await User.findOne({ email: normalizedEmail });
   if (!user) throw new AppError(404, 'User not found');
+
+  assertForgotPasswordOtp(user, otp);
+
+  const normalizedPassword = String(newPassword || '').trim();
+  if (normalizedPassword.length < 6) {
+    throw new AppError(400, 'Password must be at least 6 characters');
+  }
 
   const activeRole = normalizeAppRole(user.role);
   if (activeRole && activeRole !== userRole.admin) {
     assertLoginAllowedForRole(user, activeRole);
   }
 
-  user.password = newPassword;
+  user.password = normalizedPassword;
   (user as any).otp = undefined;
   (user as any).otpExpiry = undefined;
   await user.save();
@@ -212,6 +249,8 @@ export const authService = {
   refreshToken,
   forgotPassword,
   verifyEmail,
+  verifyForgotPasswordOtp,
   resetPassword,
   changePassword,
+  buildAuthResponse,
 };

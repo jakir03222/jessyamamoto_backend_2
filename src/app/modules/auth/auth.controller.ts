@@ -37,14 +37,15 @@ const loginUser = catchAsync(async (req, res) => {
     message: 'User logged in successfully',
     data: {
       accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
       user: result.user,
     },
   });
 });
 
 const refreshToken = catchAsync(async (req, res) => {
-  const { refreshToken } = req.cookies;
-  const result = await authService.refreshToken(refreshToken);
+  const token = req.cookies?.refreshToken || req.body?.refreshToken;
+  const result = await authService.refreshToken(token);
 
   sendResponse(res, {
     statusCode: 200,
@@ -78,9 +79,21 @@ const verifyEmail = catchAsync(async (req, res) => {
   });
 });
 
+const verifyForgotPasswordOtp = catchAsync(async (req, res) => {
+  const { email, otp } = req.body;
+  const result = await authService.verifyForgotPasswordOtp(email, otp);
+
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'OTP verified',
+    data: result,
+  });
+});
+
 const resetPassword = catchAsync(async (req, res) => {
-  const { email, newPassword } = req.body;
-  const result = await authService.resetPassword(email, newPassword);
+  const { email, otp, newPassword } = req.body;
+  const result = await authService.resetPassword(email, otp, newPassword);
 
   // Set the new refreshToken in cookie
   res.cookie('refreshToken', result.refreshToken, {
@@ -95,6 +108,7 @@ const resetPassword = catchAsync(async (req, res) => {
     message: 'Password reset successfully',
     data: {
       accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
       user: result.user,
     },
   });
@@ -132,6 +146,7 @@ export const authController = {
   loginUser,
   refreshToken,
   forgotPassword,
+  verifyForgotPasswordOtp,
   resetPassword,
   logoutUser,
   changePassword,
